@@ -1,12 +1,22 @@
 import json
 from datetime import datetime, timedelta
+
+from bson.objectid import ObjectId
 from dateutil.parser import parse
 from pymongo import MongoClient
 
-MONGO_HOST = "localhost"
+MONGO_HOST = "mongodb://gavichede:1234abcd@ds056688.mongolab.com:56688/gavichede"
 MONGO_PORT = 27017
-MONGO_DATABASE = "Gavichede"
-MONGO_CLIENT = client = MongoClient(MONGO_HOST, MONGO_PORT)
+MONGO_DATABASE = "gavichede"
+MONGO_CLIENT = client = MongoClient(MONGO_HOST)
+
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, ObjectId) or isinstance(o, datetime):
+            return str(o)
+
+        return json.JSONEncoder.default(self, o)
 
 
 def get_database() -> 'pymongo.database.Database':
@@ -41,7 +51,7 @@ class Location:
             self.__coordinates = value
 
     def to_json(self) -> str:
-        return '{"type":"%s","coordinates":%s}' % (self.type, self.coordinates)
+        return json.dumps(self.to_dict(), cls=JSONEncoder)
 
     def to_dict(self) -> dict:
         return dict(type=self.type, coordinates=self.coordinates)
@@ -68,19 +78,20 @@ class _Entities:
         return self.collection.remove(query)
 
     def get_last_20_minutes(self):
-        return self.find(query={"start_time": {"$gt": datetime.now() - timedelta(minutes=20)}})
+        return self.find(query={"start_time": {"$gt": datetime.utcnow() - timedelta(minutes=20)}})
 
 
 class Entity:
     def __init__(self, data: str) -> None:
         self.data_dict = data if type(data) is dict else json.loads(data)  # type: dict
         self.id = self.data_dict.get("_id")  # type : bson.ObjectId
-        self.__errors = []  # type :[str]
+        self.__errors = []  # type : [str]
         self.__is_valid = True  # type: bool
         self.__device_id = None  # type : str
         self.device_id = self.data_dict.get("device_id")
         self.__start_time = None  # type : datetime
         self.start_time = self.data_dict.get("start_time")
+        self.device_type = self.data_dict.get("device_type")  # type : str
         self.__location = None  # type : Location
         self.location = Location(self.data_dict.get("location", dict()))  # type: Location
 
@@ -151,14 +162,15 @@ class Entity:
         self.__location = value
 
     def to_json(self) -> str:
-        return '{"device_id":"%s","start_time":"%s","location":%s,%s}' % (
-            self.device_id, self.start_time, self.location.to_json(),
-            "" if self.id is None else '"_id":%s' % (self.id,)
-        )
+        return json.dumps(self.to_dict(), cls=JSONEncoder)
 
     def to_dict(self) -> dict:
-        _return = dict(device_id=self.device_id, start_time=self.start_time, location=self.location.to_dict())
-        return _return if self.id is None else _return.update({"_id": self.id})
+        return dict(
+            id=self.id, device_id=self.device_id,
+            start_time=self.start_time,
+            device_type=self.device_type,
+            location=self.location.to_dict()
+        )
 
 
 Entities = _Entities()
